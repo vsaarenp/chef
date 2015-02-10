@@ -20,10 +20,16 @@ require 'chef/version'
 require 'chef/util/path_helper'
 class Chef
   class Knife
+    #
+    # Public Methods of a Subcommand Loader
+    #
+    # load_commands            - loads all available subcommands
+    # load_command(args)       - loads subcommands for the given args
+    # list_commands(args)      - lists all available subcommands, optionally filtering by category
+    # subcommand_files         - returns an array of all subcommand files that could be loaded
+    # commnad_class_from(args) - returns the subcommand class for the user-requested command
+    #
     class SubcommandLoader
-
-      MATCHES_CHEF_GEM = %r{/chef-[\d]+\.[\d]+\.[\d]+}.freeze
-      MATCHES_THIS_CHEF_GEM = %r{/chef-#{Chef::VERSION}/}.freeze
 
       attr_reader :chef_config_dir
       attr_reader :env
@@ -39,6 +45,66 @@ class Chef
         true
       end
 
+      def load_command(command_name)
+        load_commands
+      end
+
+      def list_commands(preferred_category=nil)
+        load_commands
+        if preferred_category && Chef::Knife.subcommands_by_category.key?(preferred_category)
+          {preferred_category => Chef::Knife.subcommands_by_category[preferred_category]}
+        else
+          Chef::Knife.subcommands_by_category
+        end
+      end
+
+      def command_class_from(args)
+        cmd_words = positional_arguments(args)
+        cmd_name = cmd_words.join('_')
+        load_command(cmd_name)
+        result = Chef::Knife.subcommands[find_longest_key(Chef::Knife.subcommands, cmd_words, "_")]
+        result || Chef::Knife.subcommands[args.first.gsub('-', '_')]
+      end
+
+      def guess_category
+        category_words = positional_arguments(args)
+        category_words.map! {|w| w.split('-')}.flatten!
+        find_longest_key(Chef::Knife.subcommands_by_category, category_words, " ")
+      end
+
+      def subcommand_files
+        raise NotImplementedError
+      end
+
+      #
+      # Utility function for finding an element in a hash given an array
+      # of words and a separator.  We find the the longest key in the
+      # hash composed of the given words joined by the separator.
+      #
+      def find_longest_key(hash, words, sep='_')
+        match = nil
+        while ! (match || words.empty?)
+          candidate = words.join(sep)
+          if hash.key?(candidate)
+            match = candidate
+          else
+            words.pop
+          end
+        end
+        match
+      end
+
+      #
+      # The positional arguments from the argument list provided by the
+      # users. Used to search for subcommands and categories.
+      #
+      # @return [Array<String>]
+      #
+      def positional_arguments(args)
+        args.select {|arg| arg =~ /^(([[:alnum:]])[[:alnum:]\_\-]+)$/ }
+      end
+
+
       # Returns an Array of paths to knife commands located in chef_config_dir/plugins/knife/
       # and ~/.chef/plugins/knife/
       def site_subcommands
@@ -53,162 +119,6 @@ class Chef
 
         user_specific_files
       end
-
-      # Returns a Hash of paths to knife commands built-in to chef, or installed via gem.
-      # If rubygems is not installed, falls back to globbing the knife directory.
-      # The Hash is of the form {"relative/path" => "/absolute/path"}
-      #--
-      # Note: the "right" way to load the plugins is to require the relative path, i.e.,
-      #   require 'chef/knife/command'
-      # but we're getting frustrated by bugs at every turn, and it's slow besides. So
-      # subcommand loader has been modified to load the plugins by using Kernel.load
-      # with the absolute path.
-      def gem_and_builtin_subcommands
-        if have_plugin_manifest?
-          find_subcommands_via_manifest
-        else
-          # search all gems for chef/knife/*.rb
-          require 'rubygems'
-          find_subcommands_via_rubygems
-        end
-      rescue LoadError
-        find_subcommands_via_dirglob
-      end
-
-      def subcommand_files
-        @subcommand_files ||= (gem_and_builtin_subcommands.values + site_subcommands).flatten.uniq
-      end
-
-      # If the user has created a ~/.chef/plugin_manifest.json file, we'll use
-      # that instead of inspecting the on-system gems to find the plugins. The
-      # file format is expected to look like:
-      #
-      #   { "plugins": {
-      #       "knife-ec2": {
-      #         "paths": [
-      #           "/home/alice/.rubymanagerthing/gems/knife-ec2-x.y.z/lib/chef/knife/ec2_server_create.rb",
-      #           "/home/alice/.rubymanagerthing/gems/knife-ec2-x.y.z/lib/chef/knife/ec2_server_delete.rb"
-      #         ]
-      #       }
-      #     }
-      #   }
-      #
-      # Extraneous content in this file is ignored. This intentional so that we
-      # can adapt the file format for potential behavior changes to knife in
-      # the future.
-      def find_subcommands_via_manifest
-        # Format of subcommand_files is "relative_path" (something you can
-        # Kernel.require()) => full_path. The relative path isn't used
-        # currently, so we just map full_path => full_path.
-        subcommand_files = {}
-        plugin_manifest["plugins"].each do |plugin_name, plugin_manifest|
-          plugin_manifest["paths"].each do |cmd_path|
-            subcommand_files[cmd_path] = cmd_path
-          end
-        end
-        subcommand_files.merge(find_subcommands_via_dirglob)
-      end
-
-      def find_subcommands_via_dirglob
-        # The "require paths" of the core knife subcommands bundled with chef
-        files = Dir[File.join(Chef::Util::PathHelper.escape_glob(File.expand_path('../../../knife', __FILE__)), '*.rb')]
-        subcommand_files = {}
-        files.each do |knife_file|
-          rel_path = knife_file[/#{CHEF_ROOT}#{Regexp.escape(File::SEPARATOR)}(.*)\.rb/,1]
-          subcommand_files[rel_path] = knife_file
-        end
-        subcommand_files
-      end
-
-      def find_subcommands_via_rubygems
-        files = find_files_latest_gems 'chef/knife/*.rb'
-        subcommand_files = {}
-        files.each do |file|
-          rel_path = file[/(#{Regexp.escape File.join('chef', 'knife', '')}.*)\.rb/, 1]
-
-          # When not installed as a gem (ChefDK/appbundler in particular), AND
-          # a different version of Chef is installed via gems, `files` will
-          # include some files from the 'other' Chef install. If this contains
-          # a knife command that doesn't exist in this version of Chef, we will
-          # get a LoadError later when we try to require it.
-          next if from_different_chef_version?(file)
-
-          subcommand_files[rel_path] = file
-        end
-
-        subcommand_files.merge(find_subcommands_via_dirglob)
-      end
-
-      def have_plugin_manifest?
-        ENV["HOME"] && File.exist?(plugin_manifest_path)
-      end
-
-      def plugin_manifest
-        Chef::JSONCompat.from_json(File.read(plugin_manifest_path))
-      end
-
-      def plugin_manifest_path
-        File.join(ENV['HOME'], '.chef', 'plugin_manifest.json')
-      end
-
-      private
-
-      def find_files_latest_gems(glob, check_load_path=true)
-        files = []
-
-        if check_load_path
-          files = $LOAD_PATH.map { |load_path|
-            Dir["#{File.expand_path glob, Chef::Util::PathHelper.escape_glob(load_path)}#{Gem.suffix_pattern}"]
-          }.flatten.select { |file| File.file? file.untaint }
-        end
-
-        gem_files = latest_gem_specs.map do |spec|
-          # Gem::Specification#matches_for_glob wasn't added until RubyGems 1.8
-          if spec.respond_to? :matches_for_glob
-            spec.matches_for_glob("#{glob}#{Gem.suffix_pattern}")
-          else
-            check_spec_for_glob(spec, glob)
-          end
-        end.flatten
-
-        files.concat gem_files
-        files.uniq! if check_load_path
-
-        return files
-      end
-
-      def latest_gem_specs
-        @latest_gem_specs ||= if Gem::Specification.respond_to? :latest_specs
-          Gem::Specification.latest_specs(true)  # find prerelease gems
-        else
-          Gem.source_index.latest_specs(true)
-        end
-      end
-
-      def check_spec_for_glob(spec, glob)
-        dirs = if spec.require_paths.size > 1 then
-          "{#{spec.require_paths.join(',')}}"
-        else
-          spec.require_paths.first
-        end
-
-        glob = File.join(Chef::Util::PathHelper.escape_glob(spec.full_gem_path, dirs), glob)
-
-        Dir[glob].map { |f| f.untaint }
-      end
-
-      def from_different_chef_version?(path)
-        matches_any_chef_gem?(path) && !matches_this_chef_gem?(path)
-      end
-
-      def matches_any_chef_gem?(path)
-        path =~ MATCHES_CHEF_GEM
-      end
-
-      def matches_this_chef_gem?(path)
-        path =~ MATCHES_THIS_CHEF_GEM
-      end
-
     end
   end
 end
