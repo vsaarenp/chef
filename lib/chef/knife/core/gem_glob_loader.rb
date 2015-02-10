@@ -21,16 +21,9 @@ require 'chef/util/path_helper'
 class Chef
   class Knife
     class SubcommandLoader
-      class GemGlobLoader
+      class GemGlobLoader < Chef::Knife::SubcommandLoader
         MATCHES_CHEF_GEM = %r{/chef-[\d]+\.[\d]+\.[\d]+}.freeze
         MATCHES_THIS_CHEF_GEM = %r{/chef-#{Chef::VERSION}/}.freeze
-
-        attr_reader :chef_config_dir
-        attr_reader :env
-
-        def initialize(chef_config_dir, env=ENV)
-          @chef_config_dir, @env = chef_config_dir, env
-        end
 
         def subcommand_files
           @subcommand_files ||= (gem_and_builtin_subcommands.values + site_subcommands).flatten.uniq
