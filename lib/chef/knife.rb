@@ -86,6 +86,7 @@ class Chef
     def self.inherited(subclass)
       unless subclass.unnamed?
         subcommands[subclass.snake_case_name] = subclass
+        subcommand_files[subclass.snake_case_name] += [caller[0].split(/:\d+/).first]
       end
     end
 
@@ -137,6 +138,10 @@ class Chef
 
     def self.subcommands
       @@subcommands ||= {}
+    end
+
+    def self.subcommand_files
+      @@subcommand_files ||= Hash.new([])
     end
 
     def self.subcommands_by_category

@@ -24,10 +24,10 @@ class Chef
       # Load a subcommand from a user-supplied
       # manifest file
       #
-      #
-      class CustomManifestLoader
+      class CustomManifestLoader < Chef::Knife::SubcommandLoader
         attr_accessor :manifest
-        def initialize(chef_config_dir, plugin_manifest)
+        def initialize(chef_config_dir, env, plugin_manifest)
+          super(chef_config_dir, env)
           @manifest = plugin_manifest
         end
 
@@ -53,12 +53,16 @@ class Chef
           # Kernel.require()) => full_path. The relative path isn't used
           # currently, so we just map full_path => full_path.
           subcommand_files = {}
-          plugin_manifest["plugins"].each do |plugin_name, plugin_manifest|
+          manifest["plugins"].each do |plugin_name, plugin_manifest|
             plugin_manifest["paths"].each do |cmd_path|
               subcommand_files[cmd_path] = cmd_path
             end
           end
           subcommand_files.merge(find_subcommands_via_dirglob)
+        end
+
+        def subcommand_files
+          subcommand_files ||= (find_subcommands_via_manifest.values + site_subcommands).flatten.uniq
         end
       end
     end
