@@ -141,7 +141,7 @@ class Chef
       end
 
       def http_proxy_user(http_proxy)
-        http_proxy.user || || Chef::Config["#{url.scheme}_proxy_user"] ||
+        http_proxy.user || Chef::Config["#{url.scheme}_proxy_user"] ||
         ENV["#{url.scheme.upcase}_PROXY_USER"] || ENV["#{url.scheme}_proxy_user"]
       end
 
