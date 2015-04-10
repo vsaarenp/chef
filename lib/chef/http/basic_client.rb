@@ -97,7 +97,7 @@ class Chef
 
       #adapted from buildr/lib/buildr/core/transports.rb
       def proxy_uri
-        proxy = Chef::Config["#{url.scheme}_proxy"]
+        proxy = ENV["#{url.scheme}_proxy"] || Chef::Config["#{url.scheme}_proxy"]
         # Check if the proxy string contains a scheme. If not, add the url's scheme to the
         # proxy before parsing. The regex /^.*:\/\// matches, for example, http://.
         proxy = if proxy.match(/^.*:\/\//)
@@ -132,10 +132,18 @@ class Chef
           Net::HTTP
         else
           Chef::Log.debug("Using #{http_proxy.host}:#{http_proxy.port} for proxy")
-          user = Chef::Config["#{url.scheme}_proxy_user"]
-          pass = Chef::Config["#{url.scheme}_proxy_pass"]
+          user = http_proxy_user(http_proxy)
+          pass = http_proxy_pass(http_proxy)
           Net::HTTP.Proxy(http_proxy.host, http_proxy.port, user, pass)
         end
+      end
+
+      def http_proxy_user(http_proxy)
+        http_proxy.user || ENV["#{url.scheme}_proxy_user"] || Chef::Config["#{url.scheme}_proxy_user"]
+      end
+
+      def http_proxy_pass(http_proxy)
+        http_proxy.password || ENV["#{url.scheme}_proxy_pass"] || Chef::Config["#{url.scheme}_proxy_pass"]
       end
 
       def configure_ssl(http_client)
