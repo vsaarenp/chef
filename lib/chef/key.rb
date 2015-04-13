@@ -41,6 +41,22 @@ class Chef
       @expiration_date = nil
     end
 
+    def chef_rest
+      @rest ||= if @actor_field_name == "user"
+                  Chef::REST.new(Chef::Config[:chef_server_root])
+                else
+                  Chef::REST.new(Chef::Config[:chef_server_url])
+                end
+    end
+
+    def api_base
+      @api_base ||= if @actor_field_name == "user"
+                            "users"
+                          else
+                            "clients"
+                          end
+    end
+
     def actor(arg=nil)
       set_or_return(:actor, arg,
                     :regex => /^[a-z0-9\-_]+$/)
@@ -81,23 +97,23 @@ class Chef
       end
 
       # defaults the key name to the fingerprint of the key
-      if @name == nil
+      if @name.nil?
+        @name = generate_fingerprint(@public_key)
+      end
+
+      payload = {"name" => @name, "public_key" => @public_key, "expiration_date" => @expiration_date}
+      new_key = chef_rest.post_rest("#{api_base}/#{@actor}/keys", payload)
+      Chef::Key.from_hash(new_key)
+    end
+
+    def generate_fingerprint(public_key)
         # TODO: is it safe to assume we aren't dealing with certs here?
-        openssl_key_object = OpenSSL::PKey::RSA.new(@public_key)
+        openssl_key_object = OpenSSL::PKey::RSA.new(public_key)
         data_string = OpenSSL::ASN1::Sequence([
                                                 OpenSSL::ASN1::Integer.new(openssl_key_object.public_key.n),
                                                 OpenSSL::ASN1::Integer.new(openssl_key_object.public_key.e)
                                               ])
-        @name = OpenSSL::Digest::SHA1.hexdigest(data_string.to_der).scan(/../).join(':')
-      end
-
-      payload = {"name" => @name, "public_key" => @public_key, "expiration_date" => @expiration_date}
-      if @actor_field_name == "user"
-        new_key = Chef::REST.new(Chef::Config[:chef_server_root]).post_rest("users/#{@actor}/keys", payload)
-      else
-        new_key = Chef::REST.new(Chef::Config[:chef_server_url]).post_rest("clients/#{@actor}/keys", payload)
-      end
-      Chef::Key.from_hash(new_key)
+        OpenSSL::Digest::SHA1.hexdigest(data_string.to_der).scan(/../).join(':')
     end
 
     def update
@@ -105,11 +121,7 @@ class Chef
         raise ArgumentError.new("the name field must be populated when update is called")
       end
 
-      if @actor_field_name == "user"
-        new_key = Chef::REST.new(Chef::Config[:chef_server_root]).put_rest("users/#{@actor}/keys/#{@name}", to_hash)
-      else
-        new_key = Chef::REST.new(Chef::Config[:chef_server_url]).put_rest("clients/#{@actor}/keys/#{@name}", to_hash)
-      end
+      new_key = chef_rest.put_rest("#{api_base}/#{@actor}/keys/#{@name}", to_hash)
       Chef::Key.from_hash(self.to_hash.merge(new_key))
     end
 
@@ -130,11 +142,7 @@ class Chef
         raise ArgumentError.new("the name field must be populated when delete is called")
       end
 
-      if @actor_field_name == "user"
-        Chef::REST.new(Chef::Config[:chef_server_root]).delete_rest("users/#{@actor}/keys/#{@name}")
-      else
-        Chef::REST.new(Chef::Config[:chef_server_url]).delete_rest("clients/#{@actor}/keys/#{@name}")
-      end
+      chef_rest.delete_rest("#{api_base}/#{@actor}/keys/#{@name}")
     end
 
     # Class methods
