@@ -98,7 +98,7 @@ class Chef
       #adapted from buildr/lib/buildr/core/transports.rb
       def proxy_uri
         proxy = Chef::Config["#{url.scheme}_proxy"] ||
-                ENV["#{url.scheme.upcase}_PROXY"] || ENV["#{url.scheme}_proxy"]
+                env["#{url.scheme.upcase}_PROXY"] || env["#{url.scheme}_proxy"]
 
         # Check if the proxy string contains a scheme. If not, add the url's scheme to the
         # proxy before parsing. The regex /^.*:\/\// matches, for example, http://.
@@ -128,6 +128,10 @@ class Chef
         Chef::Config
       end
 
+      def env
+        ENV
+      end
+
       def http_client_builder
         http_proxy = proxy_uri
         if http_proxy.nil?
@@ -142,12 +146,12 @@ class Chef
 
       def http_proxy_user(http_proxy)
         http_proxy.user || Chef::Config["#{url.scheme}_proxy_user"] ||
-        ENV["#{url.scheme.upcase}_PROXY_USER"] || ENV["#{url.scheme}_proxy_user"]
+        env["#{url.scheme.upcase}_PROXY_USER"] || env["#{url.scheme}_proxy_user"]
       end
 
       def http_proxy_pass(http_proxy)
         http_proxy.password || Chef::Config["#{url.scheme}_proxy_pass"] ||
-        ENV["#{url.scheme.upcase}_PROXY_PASS"] || ENV["#{url.scheme}_proxy_pass"]
+        env["#{url.scheme.upcase}_PROXY_PASS"] || env["#{url.scheme}_proxy_pass"]
       end
 
       def configure_ssl(http_client)
